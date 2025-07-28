@@ -24,3 +24,7 @@ go run GBFRSaveParser.go import SaveData1.dat
 On success, you’ll see:
 Import completed, 535771 rows written
 ```
+
+**Acknowledgments**
+
+The data structures and parsing methods are derived from the project https://github.com/Nenkai/GBFRDataTools. Many thanks to nenkai for the project.
