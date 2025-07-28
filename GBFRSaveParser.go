@@ -27,9 +27,11 @@ import (
 	"math"
 	"os"
 	"strconv"
+	"strings"
 
 	fb "GBFRDataTools/FlatBuffers"
 
+	"github.com/go-sql-driver/mysql"
 	_ "github.com/go-sql-driver/mysql"
 )
 
@@ -37,6 +39,13 @@ type header struct {
 	MainVer, Reserved, SubVer         uint32
 	SteamID                           uint64
 	Offset1, SlotOff, Size1, SlotSize uint64
+}
+
+type dbOpts struct {
+	User string
+	Pass string
+	Host string // host:port
+	DB   string
 }
 
 const dsn = "user:password@tcp(127.0.0.1:3306)/relink?charset=utf8mb4&parseTime=true"
@@ -273,10 +282,124 @@ func exportCSV(db *sql.DB, outfile string) {
 	fmt.Println("CSV export completed →", outfile)
 }
 
-func main() {
-	if len(os.Args) != 3 {
-		log.Fatalf("Usage: %s import <SaveData.dat> | export <out.csv>", os.Args[0])
+func parseImportExportArgs(args []string) (string, dbOpts, error) {
+	// Defaults
+	opts := dbOpts{
+		User: "root",
+		Pass: "",
+		Host: "127.0.0.1:3306",
+		DB:   "relink",
 	}
+
+	var fileArg string
+
+	// Helper for --k=v
+	parseKV := func(s string) (k, v string, ok bool) {
+		if !strings.HasPrefix(s, "--") {
+			return "", "", false
+		}
+		parts := strings.SplitN(s[2:], "=", 2)
+		if len(parts) != 2 {
+			return "", "", false
+		}
+		return parts[0], parts[1], true
+	}
+
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "" {
+			continue
+		}
+		// handle --key=value form
+		if k, v, ok := parseKV(a); ok {
+			switch k {
+			case "user":
+				opts.User = v
+			case "password":
+				opts.Pass = v
+			case "host":
+				opts.Host = v
+			case "db", "database":
+				opts.DB = v
+			default:
+				return "", opts, fmt.Errorf("unknown flag %q", a)
+			}
+			continue
+		}
+
+		if strings.HasPrefix(a, "-") {
+			switch a {
+			case "-u", "--user":
+				i++
+				if i >= len(args) {
+					return "", opts, fmt.Errorf("%s requires a value", a)
+				}
+				opts.User = args[i]
+			case "-p", "--password":
+				i++
+				if i >= len(args) {
+					return "", opts, fmt.Errorf("%s requires a value", a)
+				}
+				opts.Pass = args[i]
+			case "--host", "-H":
+				i++
+				if i >= len(args) {
+					return "", opts, fmt.Errorf("%s requires a value", a)
+				}
+				opts.Host = args[i]
+			case "-d", "--db", "--database":
+				i++
+				if i >= len(args) {
+					return "", opts, fmt.Errorf("%s requires a value", a)
+				}
+				opts.DB = args[i]
+			default:
+				return "", opts, fmt.Errorf("unknown flag %q", a)
+			}
+			continue
+		}
+
+		// Non-flag: treat as the file path (positional).
+		if fileArg == "" {
+			fileArg = a
+		} else {
+			// Only one positional arg is expected (the path).
+			return "", opts, fmt.Errorf("unexpected extra argument %q", a)
+		}
+	}
+
+	if fileArg == "" {
+		return "", opts, fmt.Errorf("missing file argument")
+	}
+	return fileArg, opts, nil
+}
+
+func buildDSN(o dbOpts) string {
+	cfg := mysql.NewConfig()
+	cfg.User = o.User
+	cfg.Passwd = o.Pass
+	cfg.Net = "tcp"
+	cfg.Addr = o.Host
+	cfg.DBName = o.DB
+	cfg.Params = map[string]string{
+		"charset": "utf8mb4",
+	}
+	cfg.ParseTime = true
+	return cfg.FormatDSN()
+}
+
+func main() {
+	if len(os.Args) < 2 {
+		log.Fatalf("Usage:\n  %s import <SaveData1.dat> [db flags]\n  %s export <out.csv> [db flags]\n\nDB flags:\n  -u, --user <user>         (default: root)\n  -p, --password <pass>\n  -H, --host <host:port>    (default: 127.0.0.1:3306)\n  -d, --db, --database <db> (default: relink)\n", os.Args[0], os.Args[0])
+	}
+
+	sub := os.Args[1]
+	fileArg, opts, err := parseImportExportArgs(os.Args[2:])
+	if err != nil {
+		log.Fatalf("args: %v", err)
+	}
+
+	dsn := buildDSN(opts)
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		log.Fatal(err)
@@ -285,14 +408,15 @@ func main() {
 	if err := db.Ping(); err != nil {
 		log.Fatal(err)
 	}
+
 	ensureTable(db)
 
-	switch os.Args[1] {
+	switch sub {
 	case "import":
-		importBin(db, os.Args[2])
+		importBin(db, fileArg)
 	case "export":
-		exportCSV(db, os.Args[2])
+		exportCSV(db, fileArg)
 	default:
-		log.Fatalf("Unknown args %s", os.Args[1])
+		log.Fatalf("unknown subcommand %q (use import|export)", sub)
 	}
 }
