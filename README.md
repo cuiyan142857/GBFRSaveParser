@@ -51,6 +51,8 @@ go run GBFRSaveParser.go import SaveData1.dat -u root -p mypassword -H 127.0.0.1
 # Import completed, 535771 rows written
 ```
 
-**Acknowledgments**
+**Acknowledgments:**
 
-The data structures and parsing methods are derived from the project https://github.com/Nenkai/GBFRDataTools. Many thanks to nenkai for the project.
+This project is licensed under the MIT License and includes code from [Nenkai](https://github.com/Nenkai/GBFRDataTools)’s repository.
+
+Many thanks to nenkai for the project.
